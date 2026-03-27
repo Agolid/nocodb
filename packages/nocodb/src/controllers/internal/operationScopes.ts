@@ -164,4 +164,11 @@ export const OPERATION_SCOPES = {
 
   // LTAR V2 conversion
   convertLinkToV2: 'base',
+
+  // Record Trash
+  recordTrashList: 'base',
+  recordTrashCount: 'base',
+  recordTrashRestore: 'base',
+  recordTrashPermanentDelete: 'base',
+  recordTrashEmpty: 'base',
 } as const;
