@@ -3067,6 +3067,8 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
   ): Promise<Record<string, any>[]> {
     if (mergeValuesPerRecord.length === 0) return [];
 
+    await this.model.getColumns(this.context);
+
     const mergeColNames = mergeColumns.map((col) => col.column_name);
 
     // Deduplicate merge value tuples
