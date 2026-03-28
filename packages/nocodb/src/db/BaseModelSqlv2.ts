@@ -3061,7 +3061,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
    * Batch-find existing records by merge field values.
    * Returns raw DB rows with column_name keys.
    */
-  protected async findByMergeFields(
+  public async findByMergeFields(
     mergeColumns: Column[],
     mergeValuesPerRecord: any[][],
   ): Promise<Record<string, any>[]> {
@@ -3197,7 +3197,9 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
 
           if (matchedRecords?.length > 1 && throwOnDuplicate) {
             NcError.get(this.context).invalidRequestBody(
-              `Multiple records match fieldsToMergeOn [${mergeColNames.join(', ')}] — the combination must uniquely identify at most one record`,
+              `Multiple records match fieldsToMergeOn [${mergeColNames.join(
+                ', ',
+              )}] — the combination must uniquely identify at most one record`,
             );
           }
 
@@ -3392,10 +3394,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         );
       }
 
-      return {
-        updatedRecords: updatedDataList,
-        insertedRecords: insertedDataList,
-      };
+      return [...insertedDataList, ...updatedDataList];
     } catch (e) {
       await trx?.rollback();
       throw e;

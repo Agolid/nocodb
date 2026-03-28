@@ -782,7 +782,13 @@ export class DataV3Service {
       );
       if (pkFieldsInRecord.length) {
         NcError.get(context).badRequest(
-          `Record at index ${index} contains primary key field${pkFieldsInRecord.length > 1 ? 's' : ''} ${pkFieldsInRecord.map((f) => `'${f}'`).join(', ')} in 'fields'. Primary key fields are not allowed in upsert records.`,
+          `Record at index ${index} contains primary key field${
+            pkFieldsInRecord.length > 1 ? 's' : ''
+          } ${pkFieldsInRecord
+            .map((f) => `'${f}'`)
+            .join(
+              ', ',
+            )} in 'fields'. Primary key fields are not allowed in upsert records.`,
         );
       }
     }
@@ -849,8 +855,27 @@ export class DataV3Service {
       source,
     });
 
-    // 6. Call bulkUpsert with merge columns
-    const { updatedRecords, insertedRecords } = await baseModel.bulkUpsert(
+    // 6. Find existing records by merge fields to track insert vs update status
+    let existingPkSet = new Set<string>();
+
+    if (mergeColumns?.length) {
+      const mergeColNames = mergeColumns.map((col) => col.column_name);
+      const mergeValuesPerRecord = transformedBody.map((data) =>
+        mergeColNames.map((cn) => data[cn]),
+      );
+      const existingRecords = await baseModel.findByMergeFields(
+        mergeColumns,
+        mergeValuesPerRecord,
+      );
+      existingPkSet = new Set(
+        existingRecords.map((r) =>
+          String(baseModel.extractPksValues(r, true)),
+        ),
+      );
+    }
+
+    // 7. Call bulkUpsert with merge columns
+    const allRecords = await baseModel.bulkUpsert(
       transformedBody,
       {
         cookie: param.cookie,
@@ -859,20 +884,13 @@ export class DataV3Service {
       },
     );
 
-    // 7. Build ID-to-status mapping
+    // 8. Build ID-to-status mapping
     const statusMap = new Map<string, 'inserted' | 'updated'>();
 
-    for (const record of updatedRecords) {
-      const pk = baseModel.extractPksValues(record, true);
-      statusMap.set(String(pk), 'updated');
+    for (const record of allRecords) {
+      const pk = String(baseModel.extractPksValues(record, true));
+      statusMap.set(pk, existingPkSet.has(pk) ? 'updated' : 'inserted');
     }
-    for (const record of insertedRecords) {
-      const pk = baseModel.extractPksValues(record, true);
-      statusMap.set(String(pk), 'inserted');
-    }
-
-    // 8. Combine records (updates first, then inserts — matches bulkUpsert behavior)
-    const allRecords = [...updatedRecords, ...insertedRecords];
 
     const linksAsLtar =
       param.cookie.query?.[QUERY_STRING_LINKS_AS_LTAR] === 'true';
