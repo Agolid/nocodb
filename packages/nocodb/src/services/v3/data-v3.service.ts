@@ -54,7 +54,7 @@ interface RelatedModelInfo {
   primaryKeys: Column[];
 }
 
-const UPSERT_MAX_MERGE_FIELDS = 5;
+const UPSERT_MAX_MERGE_FIELDS = 3;
 const UPSERT_DISALLOWED_UITYPES = new Set([
   UITypes.Attachment,
   UITypes.LinkToAnotherRecord,
@@ -790,24 +790,27 @@ export class DataV3Service {
     // 3. Resolve merge fields to columns
     let mergeColumns: Column[] | undefined;
 
-    if (body.mergeFields?.length) {
-      if (body.mergeFields.length > UPSERT_MAX_MERGE_FIELDS) {
+    if (body.fieldsToMergeOn?.length) {
+      if (body.fieldsToMergeOn.length > UPSERT_MAX_MERGE_FIELDS) {
         NcError.get(context).badRequest(
-          `mergeFields exceeds maximum of ${UPSERT_MAX_MERGE_FIELDS} fields`,
+          `fieldsToMergeOn exceeds maximum of ${UPSERT_MAX_MERGE_FIELDS} fields`,
         );
       }
 
       mergeColumns = [];
-      for (const fieldTitle of body.mergeFields) {
-        const col = columns.find((c) => c.title === fieldTitle);
+      for (const fieldRef of body.fieldsToMergeOn) {
+        // Support both field title and column id
+        const col = columns.find(
+          (c) => c.title === fieldRef || c.id === fieldRef,
+        );
         if (!col) {
           NcError.get(context).badRequest(
-            `mergeFields: field '${fieldTitle}' does not exist in table`,
+            `fieldsToMergeOn: field '${fieldRef}' does not exist in table`,
           );
         }
         if (UPSERT_DISALLOWED_UITYPES.has(col.uidt as UITypes)) {
           NcError.get(context).badRequest(
-            `mergeFields: field '${fieldTitle}' has unsupported type '${col.uidt}' for merge matching`,
+            `fieldsToMergeOn: field '${col.title}' has unsupported type '${col.uidt}' for merge matching`,
           );
         }
         mergeColumns.push(col);
@@ -815,13 +818,14 @@ export class DataV3Service {
 
       // Validate that every record provides values for all merge fields
       for (const [index, record] of records.entries()) {
-        for (const fieldTitle of body.mergeFields) {
+        for (const mergeCol of mergeColumns) {
+          // Check by both title and id to support either key format in record fields
           if (
-            record.fields[fieldTitle] === undefined ||
-            record.fields[fieldTitle] === null
+            record.fields[mergeCol.title] === undefined &&
+            record.fields[mergeCol.id] === undefined
           ) {
             NcError.get(context).badRequest(
-              `Record at index ${index} is missing value for merge field '${fieldTitle}'`,
+              `Record at index ${index} is missing value for merge field '${mergeCol.title}'`,
             );
           }
         }
@@ -845,13 +849,13 @@ export class DataV3Service {
       source,
     });
 
-    // 6. Call bulkUpsert with mergeFields
+    // 6. Call bulkUpsert with merge columns
     const { updatedRecords, insertedRecords } = await baseModel.bulkUpsert(
       transformedBody,
       {
         cookie: param.cookie,
-        mergeFields: body.mergeFields,
         mergeColumns,
+        throwOnDuplicate: true,
       },
     );
 

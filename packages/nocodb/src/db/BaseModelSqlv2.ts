@@ -1770,10 +1770,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
             qb.orderByRaw(
               this.dbDriver.raw(
                 `CASE WHEN LOWER(??) LIKE ? THEN 0 ELSE 1 END`,
-                [
-                  pvColumn.column_name,
-                  String(pvFilter.value).toLowerCase(),
-                ],
+                [pvColumn.column_name, String(pvFilter.value).toLowerCase()],
               ),
             );
           } else if (op === 'eq') {
@@ -3064,7 +3061,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
    * Batch-find existing records by merge field values.
    * Returns raw DB rows with column_name keys.
    */
-  private async findByMergeFields(
+  protected async findByMergeFields(
     mergeColumns: Column[],
     mergeValuesPerRecord: any[][],
   ): Promise<Record<string, any>[]> {
@@ -3118,16 +3115,16 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       raw = false,
       foreign_key_checks = true,
       undo = false,
-      mergeFields,
       mergeColumns,
+      throwOnDuplicate = false,
     }: {
       chunkSize?: number;
       cookie?: any;
       raw?: boolean;
       foreign_key_checks?: boolean;
       undo?: boolean;
-      mergeFields?: string[];
       mergeColumns?: Column[];
+      throwOnDuplicate?: boolean;
     } = {},
   ) {
     let trx;
@@ -3178,14 +3175,16 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
           mergeValuesPerRecord,
         );
 
-        // Build a lookup map: stringified merge values → existing record
-        const existingMap = new Map<string, Record<string, any>>();
+        // Build a lookup map: stringified merge values → existing records
+        const existingMap = new Map<string, Record<string, any>[]>();
         for (const record of existingRecords) {
           const key = mergeColNames
             .map((cn) => String(record[cn] ?? ''))
             .join('___');
           if (!existingMap.has(key)) {
-            existingMap.set(key, record);
+            existingMap.set(key, [record]);
+          } else {
+            existingMap.get(key).push(record);
           }
         }
 
@@ -3194,7 +3193,15 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
           const key = mergeColNames
             .map((cn) => String(data[cn] ?? ''))
             .join('___');
-          const existingRecord = existingMap.get(key);
+          const matchedRecords = existingMap.get(key);
+
+          if (matchedRecords?.length > 1 && throwOnDuplicate) {
+            NcError.get(this.context).invalidRequestBody(
+              `Multiple records match fieldsToMergeOn [${mergeColNames.join(', ')}] — the combination must uniquely identify at most one record`,
+            );
+          }
+
+          const existingRecord = matchedRecords?.[0];
 
           if (existingRecord) {
             // Inject the PK from the existing record so the update WHERE clause works

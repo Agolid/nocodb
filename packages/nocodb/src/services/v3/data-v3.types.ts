@@ -95,7 +95,7 @@ export interface DataUpsertRecordRequest {
 }
 
 export interface DataUpsertRequest {
-  mergeFields?: string[];
+  fieldsToMergeOn?: string[];
   records: DataUpsertRecordRequest | DataUpsertRecordRequest[];
 }
 

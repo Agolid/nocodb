@@ -6056,7 +6056,7 @@
                       "additionalProperties": false
                     },
                     "minItems": 1,
-                    "maxItems": 1000
+                    "maxItems": 10
                   }
                 ]
               },
@@ -6177,7 +6177,7 @@
                       "additionalProperties": false
                     },
                     "minItems": 1,
-                    "maxItems": 1000
+                    "maxItems": 10
                   }
                 ]
               },
@@ -8054,11 +8054,11 @@
         "type": "object",
         "required": ["records"],
         "properties": {
-          "mergeFields": {
+          "fieldsToMergeOn": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "Field titles to match on. Defaults to primary key(s) when omitted.",
-            "maxItems": 5
+            "description": "Field titles or IDs to match on (max 3). If a matching record exists it is updated; otherwise a new record is created. When multiple records match the same combination, the request is rejected. Defaults to primary key(s) when omitted.",
+            "maxItems": 3
           },
           "records": {
             "oneOf": [
@@ -8066,7 +8066,7 @@
               {
                 "type": "array",
                 "items": { "$ref": "#/components/schemas/DataUpsertRecordRequest" },
-                "maxItems": 1000
+                "maxItems": 10
               }
             ],
             "description": "Records to upsert — single object or array"
