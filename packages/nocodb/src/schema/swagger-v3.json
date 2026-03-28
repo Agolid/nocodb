@@ -6056,7 +6056,7 @@
                       "additionalProperties": false
                     },
                     "minItems": 1,
-                    "maxItems": 10
+                    "maxItems": 1000
                   }
                 ]
               },
@@ -6177,7 +6177,7 @@
                       "additionalProperties": false
                     },
                     "minItems": 1,
-                    "maxItems": 10
+                    "maxItems": 1000
                   }
                 ]
               },
