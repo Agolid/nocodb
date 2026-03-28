@@ -18,6 +18,8 @@ import type {
   DataRecord,
   DataRecordWithDeleted,
   DataUpdateParams,
+  DataUpsertParams,
+  DataUpsertRecordResponse,
   NestedDataListParams,
 } from '~/services/v3/data-v3.types';
 import type { NcContext } from '~/interface/config';
@@ -51,6 +53,16 @@ interface RelatedModelInfo {
   primaryKey: Column;
   primaryKeys: Column[];
 }
+
+const UPSERT_MAX_MERGE_FIELDS = 5;
+const UPSERT_DISALLOWED_UITYPES = new Set([
+  UITypes.Attachment,
+  UITypes.LinkToAnotherRecord,
+  UITypes.Lookup,
+  UITypes.Rollup,
+  UITypes.Formula,
+  UITypes.Links,
+]);
 
 @Injectable()
 export class DataV3Service {
@@ -711,6 +723,167 @@ export class DataV3Service {
         linksAsLtar,
       }),
     };
+  }
+
+  async dataUpsert(
+    context: NcContext,
+    param: DataUpsertParams,
+  ): Promise<{ records: DataUpsertRecordResponse[] }> {
+    const { body } = param;
+
+    // 1. Validate top-level request structure
+    if (!body.records) {
+      NcError.get(context).invalidRequestBody("Property 'records' is required");
+    }
+
+    const records = Array.isArray(body.records)
+      ? body.records
+      : [body.records];
+
+    if (records.length === 0) {
+      NcError.get(context).invalidRequestBody("'records' must not be empty");
+    }
+
+    // Validate each record has 'fields'
+    for (const [index, record] of records.entries()) {
+      if (!record.fields || typeof record.fields !== 'object') {
+        NcError.get(context).invalidRequestBody(
+          `Property 'fields' is required on record at index ${index}`,
+        );
+      }
+      const otherProps = Object.keys(record).filter(
+        (prop) => prop !== 'fields',
+      );
+      if (otherProps.length) {
+        NcError.get(context).invalidRequestBody(
+          `Properties ${otherProps
+            .map((f) => `'${f}'`)
+            .join(',')} on record at index ${index} are not allowed. Only 'fields' is accepted.`,
+        );
+      }
+    }
+
+    if (records.length > V3_DATA_PAYLOAD_LIMIT) {
+      NcError.get(context).maxPayloadLimitExceeded(V3_DATA_PAYLOAD_LIMIT);
+    }
+
+    // 2. Get model info
+    const { model, primaryKey, primaryKeys, columns } =
+      await this.getModelInfo(context, param.modelId);
+
+    // 3. Resolve merge fields to columns
+    let mergeColumns: Column[] | undefined;
+
+    if (body.mergeFields?.length) {
+      if (body.mergeFields.length > UPSERT_MAX_MERGE_FIELDS) {
+        NcError.get(context).badRequest(
+          `mergeFields exceeds maximum of ${UPSERT_MAX_MERGE_FIELDS} fields`,
+        );
+      }
+
+      mergeColumns = [];
+      for (const fieldTitle of body.mergeFields) {
+        const col = columns.find((c) => c.title === fieldTitle);
+        if (!col) {
+          NcError.get(context).badRequest(
+            `mergeFields: field '${fieldTitle}' does not exist in table`,
+          );
+        }
+        if (UPSERT_DISALLOWED_UITYPES.has(col.uidt as UITypes)) {
+          NcError.get(context).badRequest(
+            `mergeFields: field '${fieldTitle}' has unsupported type '${col.uidt}' for merge matching`,
+          );
+        }
+        mergeColumns.push(col);
+      }
+
+      // Validate that every record provides values for all merge fields
+      for (const [index, record] of records.entries()) {
+        for (const fieldTitle of body.mergeFields) {
+          if (
+            record.fields[fieldTitle] === undefined ||
+            record.fields[fieldTitle] === null
+          ) {
+            NcError.get(context).badRequest(
+              `Record at index ${index} is missing value for merge field '${fieldTitle}'`,
+            );
+          }
+        }
+      }
+    }
+
+    // 4. Transform LTAR fields
+    const ltarColumns = columns.filter((col) => isLinksOrLTAR(col));
+
+    const transformedBody = await Promise.all(
+      records.map(async (record) =>
+        this.transformLTARFieldsToInternal(
+          context,
+          record.fields,
+          ltarColumns,
+        ),
+      ),
+    );
+
+    // 5. Get base model
+    const source = await Source.get(context, model.source_id);
+    const baseModel = await Model.getBaseModelSQL(context, {
+      id: model.id,
+      dbDriver: await NcConnectionMgrv2.get(source),
+      source,
+    });
+
+    // 6. Call bulkUpsert with mergeFields
+    const { updatedRecords, insertedRecords } = await baseModel.bulkUpsert(
+      transformedBody,
+      {
+        cookie: param.cookie,
+        mergeFields: body.mergeFields,
+        mergeColumns,
+      },
+    );
+
+    // 7. Build ID-to-status mapping
+    const statusMap = new Map<string, 'inserted' | 'updated'>();
+
+    for (const record of updatedRecords) {
+      const pk = baseModel.extractPksValues(record, true);
+      statusMap.set(String(pk), 'updated');
+    }
+    for (const record of insertedRecords) {
+      const pk = baseModel.extractPksValues(record, true);
+      statusMap.set(String(pk), 'inserted');
+    }
+
+    // 8. Combine records (updates first, then inserts — matches bulkUpsert behavior)
+    const allRecords = [...updatedRecords, ...insertedRecords];
+
+    const linksAsLtar =
+      param.cookie.query?.[QUERY_STRING_LINKS_AS_LTAR] === 'true';
+
+    // 9. Transform to V3 format
+    const v3Records = await this.transformRecordsToV3Format({
+      context,
+      records: allRecords,
+      primaryKey,
+      primaryKeys,
+      requestedFields: undefined,
+      columns,
+      nestedLimit: undefined,
+      skipSubstitutingColumnIds:
+        param.cookie.query?.[QUERY_STRING_FIELD_ID_ON_RESULT] === 'true',
+      reuse: {},
+      depth: 0,
+      linksAsLtar,
+    });
+
+    // 10. Attach status to each record
+    const result: DataUpsertRecordResponse[] = v3Records.map((record) => ({
+      ...record,
+      status: statusMap.get(String(record.id)) ?? 'inserted',
+    }));
+
+    return { records: result };
   }
 
   async dataDelete(

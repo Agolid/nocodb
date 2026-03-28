@@ -174,10 +174,12 @@ export class BulkDataAliasService {
   ) {
     validateV1V2DataPayloadLimit(context, param);
 
-    return await this.executeBulkOperation(context, {
-      ...param,
-      operation: 'bulkUpsert',
-      options: [param.body, { cookie: param.cookie, undo: param.undo }],
-    });
+    const { updatedRecords, insertedRecords } =
+      await this.executeBulkOperation(context, {
+        ...param,
+        operation: 'bulkUpsert',
+        options: [param.body, { cookie: param.cookie, undo: param.undo }],
+      });
+    return [...updatedRecords, ...insertedRecords];
   }
 }
