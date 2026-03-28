@@ -773,6 +773,20 @@ export class DataV3Service {
       param.modelId,
     );
 
+    // 2b. Validate that records do not contain primary key fields
+    const pkTitles = new Set(primaryKeys.map((pk) => pk.title));
+
+    for (const [index, record] of records.entries()) {
+      const pkFieldsInRecord = Object.keys(record.fields).filter((key) =>
+        pkTitles.has(key),
+      );
+      if (pkFieldsInRecord.length) {
+        NcError.get(context).badRequest(
+          `Record at index ${index} contains primary key field${pkFieldsInRecord.length > 1 ? 's' : ''} ${pkFieldsInRecord.map((f) => `'${f}'`).join(', ')} in 'fields'. Primary key fields are not allowed in upsert records.`,
+        );
+      }
+    }
+
     // 3. Resolve merge fields to columns
     let mergeColumns: Column[] | undefined;
 
