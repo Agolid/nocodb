@@ -736,9 +736,7 @@ export class DataV3Service {
       NcError.get(context).invalidRequestBody("Property 'records' is required");
     }
 
-    const records = Array.isArray(body.records)
-      ? body.records
-      : [body.records];
+    const records = Array.isArray(body.records) ? body.records : [body.records];
 
     if (records.length === 0) {
       NcError.get(context).invalidRequestBody("'records' must not be empty");
@@ -758,7 +756,9 @@ export class DataV3Service {
         NcError.get(context).invalidRequestBody(
           `Properties ${otherProps
             .map((f) => `'${f}'`)
-            .join(',')} on record at index ${index} are not allowed. Only 'fields' is accepted.`,
+            .join(
+              ',',
+            )} on record at index ${index} are not allowed. Only 'fields' is accepted.`,
         );
       }
     }
@@ -768,8 +768,10 @@ export class DataV3Service {
     }
 
     // 2. Get model info
-    const { model, primaryKey, primaryKeys, columns } =
-      await this.getModelInfo(context, param.modelId);
+    const { model, primaryKey, primaryKeys, columns } = await this.getModelInfo(
+      context,
+      param.modelId,
+    );
 
     // 3. Resolve merge fields to columns
     let mergeColumns: Column[] | undefined;
@@ -817,11 +819,7 @@ export class DataV3Service {
 
     const transformedBody = await Promise.all(
       records.map(async (record) =>
-        this.transformLTARFieldsToInternal(
-          context,
-          record.fields,
-          ltarColumns,
-        ),
+        this.transformLTARFieldsToInternal(context, record.fields, ltarColumns),
       ),
     );
 
